@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Next.js
+.next/
+out/
+
+# Tests / coverage
+coverage/
+.nyc_output/
+
+# Vite / Vitest cache
+.vite/
+
+# Environment (keep the documented template tracked)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local / OS
+*.local
+.DS_Store
+Thumbs.db

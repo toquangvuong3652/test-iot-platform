@@ -1,0 +1,38 @@
+# Cloudflare Tunnel (cloudflared) — Base v1 device + API ingress.
+#
+# Referenced from infra/emqx/emqx.conf (the WSS listener `:8084` is what the
+# `iot-mqtt` hostname forwards to). Run cloudflared on the host (outside the
+# compose network), so the `service` origins point at the HOST-exposed ports
+# that docker-compose publishes (api :3000, emqx WSS :8084).
+#
+# Setup:
+#   1. `cloudflared tunnel login`
+#   2. `cloudflared tunnel create iot-platform`  -> writes <TUNNEL_ID>.json
+#   3. Fill TUNNEL_ID + the credentials-file path below, plus your real
+#      hostnames (DNS records CNAME -> <TUNNEL_ID>.cfargotunnel.com).
+#   4. `cloudflared tunnel --config infra/cloudflare/config.yml run iot-platform`
+#
+# Replace the *.example.com hostnames with your real domains.
+
+tunnel: <TUNNEL_ID>
+credentials-file: /path/to/<TUNNEL_ID>.json
+
+ingress:
+  # REST API (auth, devices, telemetry, commands, dashboard data).
+  # Cloudflare terminates TLS; forwards plain HTTP to the api.
+  - hostname: api.example.com
+    service: http://localhost:3000
+
+  # Device MQTT-over-WebSocket. Devices CONNECT to wss://iot-mqtt.example.com,
+  # which the tunnel forwards to EMQX's WSS listener :8084 (emqx.conf).
+  # Keep device keepalive at 30s (PROTOCOL.md §1): CF drops idle WS at ~100s.
+  - hostname: iot-mqtt.example.com
+    service: http://localhost:8084
+
+  # Realtime (socket.io) gateway. The dashboard connects here cross-origin via
+  # NEXT_PUBLIC_WS_URL. Forwards to the consumer's socket.io server :3001.
+  - hostname: realtime.example.com
+    service: http://localhost:3001
+
+  # Catch-all: reject anything not matched above.
+  - service: http_status:404

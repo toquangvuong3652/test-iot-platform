@@ -1,0 +1,138 @@
+# EMQX 5.8.3 — Base v1 (PROTOCOL.md §1/§5).
+# Schema per the 5.8.3 `emqx_conf_schema` (verified in-image, 2026-09-29):
+#   authentication = [{ …authn:http_post… }]  — flat: top-level `method`, `url`,
+#     `headers`, `body` (`method` is the union discriminator; no nested `request {}`)
+#   authorization  { no_match, deny_action, cache, sources = [{ type, … }] }
+# Runs in the compose network as `emqx`; the api container is the HTTP
+# authn/authz backend (http://api:3000).
+#
+# Isolation model (Phase 1):
+#   - Tenant isolation is enforced by AUTHENTICATION, not ACL: EMQX calls
+#     api POST /mqtt/auth for every CONNECT; the api verifies the token against
+#     the `tenant:device` pair in the username. A stolen token from tenant A
+#     cannot CONNECT as tenant B.
+#   - Authorization (HTTP authz -> api POST /mqtt/acl, per PROTOCOL.md §5)
+#     pins per-tenant/per-device: a device may only touch ITS OWN topics
+#     (credential checked in PostgreSQL, cached in the api 30s). EMQX's own
+#     `no_match = deny` is the fail-closed backstop for every request the
+#     api does not explicitly allow.
+#   - HTTP authn/authz contract (5.8.3) is BODY-BASED: the api answers HTTP 200
+#     with {"result": "allow" | "deny" | "ignore"}. Status 204 also = allow;
+#     any other status makes EMQX IGNORE that source (move to the next) — it is
+#     NOT a deny. The api never signals deny via a status code.
+
+# This file REPLACES the image default emqx.conf, so the fields the official
+# entrypoint normally injects must be set here: node.cookie + node.data_dir.
+# The compose service also passes EMQX_NODE_NAME=emqx@127.0.0.1; the two
+# agree, so the node name stays deterministic regardless of container IP.
+node {
+  name = "emqx@127.0.0.1"
+  cookie = "emqx_base_v1_cookie_8f3k2m9x"
+  data_dir = "/opt/emqx/data"
+}
+
+# ---- Listeners -------------------------------------------------------------
+# Plain MQTT for the docker-internal services (api downlink, consumer uplink).
+listeners.tcp.internal {
+  bind = 1883
+  max_connections = 10000
+}
+
+# Plain WebSocket (MQTT over WS) for devices behind the Cloudflare Tunnel.
+# Cloudflare terminates the OUTER TLS and forwards a plain-WS connection to
+# 8084 (tunnel: iot-mqtt.example.com -> emqx:8084, see infra/cloudflare/config.yml),
+# so the listener here is `ws`, NOT `wss` — a wss listener would demand TLS
+# certs EMQX does not have and the listener (or node) would fail to start.
+listeners.ws.cf {
+  bind = 8084
+  max_connections = 10000
+}
+
+# The image's own schema code (emqx_schema.erl @5.8.3) injects built-in
+# `*:default` listeners (tcp 0.0.0.0:1883, ws 8083, ssl 8883, wss 8084)
+# whenever the `default` key is absent from each listeners map — tcp:default
+# would collide with tcp.internal on 1883 (eaddrinuse) and wss:default with
+# ws.cf on 8084. Tombstone each one (bare value, NOT a block) so none start.
+listeners.tcp.default = marked_for_deletion
+listeners.ws.default  = marked_for_deletion
+listeners.ssl.default = marked_for_deletion
+listeners.wss.default = marked_for_deletion
+
+# Bounded session queue — the "no bus" regime only holds with this + an
+# idempotent consumer + DLQ (Spec pitfall). A stalled consumer must not OOM
+# the broker. In 5.8.3 the per-session queue cap is `mqtt.max_mqueue_len`
+# (the old 5.x top-level `session {}` block no longer exists — it logged
+# config_key_not_recognized and applied nothing; `max_mailbox_size` and the
+# two mqueue ratio keys have no 5.8.3 session equivalent). A full queue drops
+# oldest QoS0 messages, so this cap alone bounds broker memory.
+mqtt {
+  max_mqueue_len = 1000
+}
+
+# ---- Authentication: HTTP authn -> api ------------------------------------
+# Every CONNECT is verified by the api (authn:http_post): device
+# `tenant:device` tokens are checked against device_credentials (sha256);
+# `platform:*` principals are checked against PLATFORM_MQTT_TOKEN.
+# 5.8.3 decision is in the JSON body: {"result":"allow"|"deny"|"ignore"} on
+# HTTP 200 (204 also = allow; any other status = ignore this source, not deny).
+# (No 5.8.3 `responses`/`code` body mapping; no authn-level `cache`;
+# no `allow_anonymous` — anonymity is impossible while an auth source
+# is configured.)
+authentication = [
+  {
+    mechanism = password_based
+    backend   = http
+    method    = post
+    enable    = true
+    url       = "http://api:3000/mqtt/auth"
+    headers {
+      x-internal-secret = "${MQTT_AUTH_INTERNAL_SECRET}"
+    }
+    body {
+      clientid = "${clientid}"
+      username = "${username}"
+      password = "${password}"
+    }
+    connect_timeout = "30s"
+  }
+]
+
+# ---- Authorization: HTTP authz -> api (per-tenant/per-device, §5) ---------
+# EMQX asks the api per (username, clientid, topic, action); the api returns
+# HTTP 200 with {"result":"allow"|"deny"} (204 = allow; any other status =
+# ignore this source, not deny), cred existence cached 30s in the api.
+# no_match = deny: anything the source does not allow is denied by EMQX
+# itself (fail closed). deny_action = ignore: a denied PUBLISH is dropped,
+# a denied SUBSCRIBE is rejected (the connection is not killed — the api
+# already rejected the CONNECT for bad credentials).
+authorization {
+  no_match    = deny
+  deny_action = ignore
+  sources = [
+    {
+      type = http
+      method = post
+      url    = "http://api:3000/mqtt/acl"
+      headers {
+        "Content-Type" = "application/json"
+        x-internal-secret = "${MQTT_AUTH_INTERNAL_SECRET}"
+      }
+      body {
+        clientid = "${clientid}"
+        username = "${username}"
+        action   = "${action}"
+        topic    = "${topic}"
+      }
+      connect_timeout = "30s"
+    }
+  ]
+}
+
+log {
+  file {
+    rotation {
+      count = 10
+      size = "50MB"
+    }
+  }
+}

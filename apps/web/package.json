@@ -1,0 +1,25 @@
+{
+  "name": "@iot/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js 14 dashboard: login + realtime (socket.io) + ECharts telemetry + command panel.",
+  "scripts": {
+    "dev": "next dev -p 3002",
+    "build": "next build",
+    "start": "next start -p 3002",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "echarts": "^5.5.1",
+    "next": "14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.5.4"
+  }
+}

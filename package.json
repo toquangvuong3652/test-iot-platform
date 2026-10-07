@@ -1,0 +1,27 @@
+{
+  "name": "iot-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "IoT Platform Base v1 — monorepo (api, consumer, web, shared)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @iot/shared && npm run build -w @iot/api && npm run build -w @iot/consumer && npm run build -w @iot/web",
+    "build:shared": "npm run build -w @iot/shared",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:api": "npm run dev -w @iot/api",
+    "dev:consumer": "npm run dev -w @iot/consumer",
+    "dev:web": "npm run dev -w @iot/web",
+    "prisma:generate": "npm run prisma:generate -w @iot/api",
+    "prisma:migrate": "npm run prisma:migrate -w @iot/api"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

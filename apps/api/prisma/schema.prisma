@@ -1,0 +1,168 @@
+// IoT Platform — Base v1 data model.
+// Telemetry is PARTITIONED BY RANGE (reported_at) — created as a partitioned table
+// in the hand-written initial migration (prisma/migrations/0001_init/migration.sql),
+// because Prisma does not emit partition DDL. Everything else is Prisma-managed.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  plan      String   @default("free")
+  quota     Int      @default(50) // max devices
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users       User[]
+  devices     Device[]
+  credentials DeviceCredential[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         String   @default("member") // admin | member | viewer
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model MachineType {
+  id        String   @id @default(uuid())
+  name      String
+  spec      Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  devices Device[]
+
+  @@map("machine_types")
+}
+
+model Device {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  machineTypeId String?   @map("machine_type_id")
+  name          String
+  status        String    @default("offline") // online | offline | error
+  lastSeenAt    DateTime? @map("last_seen_at")
+  shadow        Json? // extension point — left null in Phase 1
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  machineType MachineType?      @relation(fields: [machineTypeId], references: [id])
+  credential  DeviceCredential?
+  alarms      Alarm[]
+  commands    Command[]
+  rules       DeviceRule[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@map("devices")
+}
+
+model DeviceCredential {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  deviceId   String   @unique @map("device_id") // 1:1 with Device (device id is a uuid)
+  username   String   @unique // EMQX username = clientid = {tenantId}:{deviceId}
+  tokenHash  String   @map("token_hash")
+  rotatedAt  DateTime @default(now()) @map("rotated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // 1:1 back-relation (Device.credential). Cascade so deleting a device removes
+  // its credential (no orphaned tokens).
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, deviceId])
+  @@map("device_credentials")
+}
+
+// NOTE: partitioned table — unique on (message_id, reported_at) is enforced in SQL.
+model Telemetry {
+  id         String   @id @default(uuid())
+  messageId  String   @map("message_id")
+  tenantId   String   @map("tenant_id")
+  deviceId   String   @map("device_id")
+  data       Json
+  reportedAt DateTime @map("reported_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, deviceId, reportedAt(sort: Desc)])
+  @@map("telemetry")
+}
+
+model Alarm {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  deviceId    String   @map("device_id")
+  rule        Json
+  message     String
+  severity    String   @default("warn") // info | warn | critical
+  state       String   @default("active") // active | acknowledged | resolved
+  triggeredAt DateTime @default(now()) @map("triggered_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, state])
+  @@map("alarms")
+}
+
+model Command {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  deviceId    String    @map("device_id")
+  type        String
+  payload     Json
+  state       String    @default("pending") // pending | acked | failed | expired
+  ackPayload  Json?     @map("ack_payload")
+  publishedAt DateTime  @default(now()) @map("published_at")
+  ackedAt     DateTime? @map("acked_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, state])
+  @@map("commands")
+}
+
+// Per-device alarm threshold. Evaluated by the consumer on every telemetry.
+model DeviceRule {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  deviceId  String   @map("device_id")
+  name      String
+  metric    String
+  op        String   @default("gt") // gt | lt | gte | lte
+  threshold Float
+  severity  String   @default("warn")
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, deviceId])
+  @@map("device_rules")
+}
+
+model DeadLetter {
+  id         String   @id @default(uuid())
+  topic      String
+  payload    Json
+  reason     String
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  @@map("dead_letter")
+}

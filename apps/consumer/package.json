@@ -1,0 +1,29 @@
+{
+  "name": "@iot/consumer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MQTT uplink consumer: mqtt.js subscribe + idempotent Prisma write + DLQ + socket.io gateway (realtime dashboard feed).",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "start:dev": "ts-node -T src/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@iot/shared": "0.1.0",
+    "@prisma/client": "^5.22.0",
+    "jsonwebtoken": "^9.0.2",
+    "mqtt": "^5.10.1",
+    "socket.io": "^4.7.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}

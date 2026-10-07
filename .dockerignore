@@ -1,0 +1,19 @@
+# Keep images lean + reproducible. We run `npm ci` inside the image, so never
+# copy the host node_modules. dist/.next are rebuilt in the build stage.
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/.vite
+**/*.tsbuildinfo
+
+.git
+.github
+
+# Secrets — env is injected by docker-compose at runtime.
+.env
+.env.*
+!.env.example
+
+*.log
+npm-debug.log*
